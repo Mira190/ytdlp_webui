@@ -1,7 +1,9 @@
 📺 YT-DLP Web UI - Video Downloader
+
 🚀 A simple and user-friendly YouTube video downloader with a modern web UI, powered by Flask & yt-dlp.
 
 ✅ Features:
+
 📥 Download YouTube videos in different formats (MP4, WebM, MKV)
 🎵 Extract audio (MP3 format)
 📺 Select video resolution (480p, 720p, 1080p)
@@ -11,14 +13,18 @@
 🎯 Simply enter the video URL, select format & resolution, and click "Start Download" – it's that easy!
 
 📥 Download & Run
+
 Method 1️⃣: Run the EXE (No Installation Required)
 📌 For Windows users – just download and run!
 
 📥 Download yt-dlp-webui.exe (Latest Version)
+
 Double-click yt-dlp-webui.exe
+
 Enter the YouTube video URL, choose format & resolution, and start downloading! 🚀
 
 🛠️ How to Run Locally
+
 Install Python dependencies:
 bash
 Copy
@@ -44,6 +50,7 @@ pyinstaller --onefile --add-data "templates;templates" main.py
 The generated executable will be in the dist/ folder.
 
 🌟 Features
+
 ✅ Download YouTube videos (MP4, WebM, MKV)
 ✅ Supports 480p / 720p / 1080p resolutions
 ✅ Extract audio as MP3
@@ -52,6 +59,7 @@ The generated executable will be in the dist/ folder.
 ✅ Multi-language support (English & Chinese)
 
 📸 Screenshots
+
 🎨 Web UI 📥 Download Progress
 📌 Troubleshooting
 
