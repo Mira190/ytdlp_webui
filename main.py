@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 import uuid
 import webbrowser
 from flask import Flask, render_template, request, jsonify
@@ -13,8 +14,42 @@ app = Flask(__name__, template_folder=TEMPLATES_DIR)
 # Store progress data for each job_id
 PROGRESS = {}
 
+# How long a finished/errored job's progress entry is kept before being
+# swept, so a long-running server doesn't accumulate one entry per download
+# forever.
+PROGRESS_TTL_SECONDS = 3600
+
 # To ensure we only open a browser once
 BROWSER_OPENED = False
+
+# Format string lookup for get_format_option(). Built once at import time
+# instead of on every call.
+FORMAT_MAP = {
+    "mp4": {
+        "best": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]",
+        "480p": "bestvideo[ext=mp4][height<=480]+bestaudio[ext=m4a]",
+        "720p": "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]",
+        "1080p": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]"
+    },
+    "webm": {
+        "best": "bestvideo[ext=webm]+bestaudio/best[ext=webm]",
+        "480p": "bestvideo[ext=webm][height<=480]+bestaudio/best[ext=webm]",
+        "720p": "bestvideo[ext=webm][height<=720]+bestaudio/best[ext=webm]",
+        "1080p": "bestvideo[ext=webm][height<=1080]+bestaudio/best[ext=webm]"
+    },
+    "mkv": {
+        "best": "bestvideo[ext=mkv]+bestaudio/best[ext=mkv]",
+        "480p": "bestvideo[ext=mkv][height<=480]+bestaudio/best[ext=mkv]",
+        "720p": "bestvideo[ext=mkv][height<=720]+bestaudio/best[ext=mkv]",
+        "1080p": "bestvideo[ext=mkv][height<=1080]+bestaudio/best[ext=mkv]"
+    },
+    "default": {
+        "best": "best",
+        "480p": "bestvideo[height<=480]+bestaudio/best[height<=480]",
+        "720p": "bestvideo[height<=720]+bestaudio/best[height<=720]",
+        "1080p": "bestvideo[height<=1080]+bestaudio/best[height<=1080]"
+    }
+}
 
 class SimpleLogger:
     """
@@ -66,6 +101,7 @@ def progress_hook_factory(job_id):
                 "speed": speed,
                 "eta": eta,
                 "percent": percent,
+                "updated_at": time.time(),
             }
 
         elif status == "finished":
@@ -73,24 +109,42 @@ def progress_hook_factory(job_id):
             PROGRESS[job_id] = {
                 "status": "finished",
                 "percent": 100,
-                "eta": 0
+                "eta": 0,
+                "updated_at": time.time(),
             }
 
         elif status == "error":
             # If there is an error, store it
             PROGRESS[job_id] = {
                 "status": "error",
-                "error": d.get("error", "Unknown error")
+                "error": d.get("error", "Unknown error"),
+                "updated_at": time.time(),
             }
 
         else:
             # For other statuses (e.g. 'init'), store a basic status
             # so that the front end does not break on missing fields
             PROGRESS[job_id] = {
-                "status": status or "unknown"
+                "status": status or "unknown",
+                "updated_at": time.time(),
             }
 
     return hook
+
+
+def cleanup_stale_progress():
+    """
+    Remove finished/errored progress entries older than PROGRESS_TTL_SECONDS
+    so a long-running server doesn't accumulate one entry per download forever.
+    """
+    cutoff = time.time() - PROGRESS_TTL_SECONDS
+    stale_ids = [
+        job_id for job_id, data in PROGRESS.items()
+        if data.get("status") in ("finished", "error")
+        and data.get("updated_at", 0) < cutoff
+    ]
+    for job_id in stale_ids:
+        del PROGRESS[job_id]
 
 
 def get_format_option(quality, audio_only, file_format):
@@ -103,33 +157,7 @@ def get_format_option(quality, audio_only, file_format):
     if audio_only:
         return "bestaudio"
 
-    mapping = {
-        "mp4": {
-            "best": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]",
-            "480p": "bestvideo[ext=mp4][height<=480]+bestaudio[ext=m4a]",
-            "720p": "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]",
-            "1080p": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]"
-        },
-        "webm": {
-            "best": "bestvideo[ext=webm]+bestaudio/best[ext=webm]",
-            "480p": "bestvideo[ext=webm][height<=480]+bestaudio/best[ext=webm]",
-            "720p": "bestvideo[ext=webm][height<=720]+bestaudio/best[ext=webm]",
-            "1080p": "bestvideo[ext=webm][height<=1080]+bestaudio/best[ext=webm]"
-        },
-        "mkv": {
-            "best": "bestvideo[ext=mkv]+bestaudio/best[ext=mkv]",
-            "480p": "bestvideo[ext=mkv][height<=480]+bestaudio/best[ext=mkv]",
-            "720p": "bestvideo[ext=mkv][height<=720]+bestaudio/best[ext=mkv]",
-            "1080p": "bestvideo[ext=mkv][height<=1080]+bestaudio/best[ext=mkv]"
-        },
-        "default": {
-            "best": "best",
-            "480p": "bestvideo[height<=480]+bestaudio/best[height<=480]",
-            "720p": "bestvideo[height<=720]+bestaudio/best[height<=720]",
-            "1080p": "bestvideo[height<=1080]+bestaudio/best[height<=1080]"
-        }
-    }
-    return mapping.get(file_format.lower(), mapping["default"]).get(quality, "best")
+    return FORMAT_MAP.get(file_format.lower(), FORMAT_MAP["default"]).get(quality, "best")
 
 
 def download_video(job_id, url, quality, audio_only, download_dir, file_format):
@@ -201,10 +229,12 @@ def start_download():
     if not url:
         return jsonify({"status": "error", "output": "Please provide a valid video URL."})
 
+    cleanup_stale_progress()
+
     job_id = str(uuid.uuid4())
 
     # Initialize progress record
-    PROGRESS[job_id] = {"status": "started", "percent": 0}
+    PROGRESS[job_id] = {"status": "started", "percent": 0, "updated_at": time.time()}
 
     # Start a new thread for downloading
     threading.Thread(
@@ -244,4 +274,4 @@ def open_browser():
 if __name__ == '__main__':
     # Automatically open the browser after 1.5 seconds (optional)
     threading.Timer(1.5, open_browser).start()
-    app.run(debug=False)
+    app.run(debug=False, threaded=True)
