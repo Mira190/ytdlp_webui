@@ -53,6 +53,20 @@ pyinstaller --onefile --add-data "templates;templates" main.py
 
 The generated executable will be in the `dist/` folder.
 
+## 🚀 Releasing
+
+Releases are automated. Pushing a tag matching `v*.*.*` (e.g. `v1.2.0`) triggers
+[`.github/workflows/release.yml`](.github/workflows/release.yml), which builds
+`yt-dlp-webui.exe` with PyInstaller and publishes it as a GitHub Release asset:
+
+```bash
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+Every push/PR to `main` also runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml),
+a quick compile/import sanity check, so breakage is caught before a release is cut.
+
 ## 📌 Troubleshooting
 
 1. **EXE doesn't open?**
