@@ -64,8 +64,25 @@ git tag v1.2.0
 git push origin v1.2.0
 ```
 
-Every push/PR to `main` also runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml),
-a quick compile/import sanity check, so breakage is caught before a release is cut.
+Every push/PR to `main` also runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+pyflakes, the offline test suite, and a format-selection benchmark that fails
+if any UI quality/format combination stops selecting a usable format.
+
+## 🧪 Development
+
+```bash
+pip install -r requirements.txt pytest pyflakes
+python -m pytest tests/ -q               # offline test suite
+python benchmarks/run_format_bench.py    # format-selection benchmark (exit 0 = all pass)
+```
+
+Project docs: [architecture](docs/architecture.md) ·
+[critical review](docs/critical-review.md) ·
+[benchmarks](BENCHMARK_RESULTS.md) · [known failures](KNOWN_FAILURES.md) ·
+[next steps](NEXT_STEPS.md) · [handoff](HANDOFF.md)
+
+> **Note:** merging video+audio, mp4/webm/mkv output, and MP3 extraction
+> require [ffmpeg](https://ffmpeg.org/) on your PATH.
 
 ## 📌 Troubleshooting
 

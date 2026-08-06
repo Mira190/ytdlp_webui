@@ -1,8 +1,10 @@
+import collections
 import os
 import threading
 import time
 import uuid
 import webbrowser
+from urllib.parse import urlsplit
 from flask import Flask, render_template, request, jsonify
 import yt_dlp
 
@@ -22,42 +24,58 @@ PROGRESS_TTL_SECONDS = 3600
 # To ensure we only open a browser once
 BROWSER_OPENED = False
 
-# Format string lookup for get_format_option(). Built once at import time
-# instead of on every call.
-FORMAT_MAP = {
-    "mp4": {
-        "best": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]",
-        "480p": "bestvideo[ext=mp4][height<=480]+bestaudio[ext=m4a]",
-        "720p": "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]",
-        "1080p": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]"
-    },
-    "webm": {
-        "best": "bestvideo[ext=webm]+bestaudio/best[ext=webm]",
-        "480p": "bestvideo[ext=webm][height<=480]+bestaudio/best[ext=webm]",
-        "720p": "bestvideo[ext=webm][height<=720]+bestaudio/best[ext=webm]",
-        "1080p": "bestvideo[ext=webm][height<=1080]+bestaudio/best[ext=webm]"
-    },
-    "mkv": {
-        "best": "bestvideo[ext=mkv]+bestaudio/best[ext=mkv]",
-        "480p": "bestvideo[ext=mkv][height<=480]+bestaudio/best[ext=mkv]",
-        "720p": "bestvideo[ext=mkv][height<=720]+bestaudio/best[ext=mkv]",
-        "1080p": "bestvideo[ext=mkv][height<=1080]+bestaudio/best[ext=mkv]"
-    },
-    "default": {
-        "best": "best",
-        "480p": "bestvideo[height<=480]+bestaudio/best[height<=480]",
-        "720p": "bestvideo[height<=720]+bestaudio/best[height<=720]",
-        "1080p": "bestvideo[height<=1080]+bestaudio/best[height<=1080]"
-    }
-}
+# Height cap for each quality choice offered by the UI; "best" has no cap.
+QUALITY_HEIGHTS = {"480p": 480, "720p": 720, "1080p": 1080}
+
+# Container choices the UI offers that yt-dlp should merge/remux into.
+MERGE_CONTAINERS = ("mp4", "webm", "mkv")
+
+# Hosts this app considers "itself". The server only ever binds loopback,
+# but any webpage the user visits can still form-POST to it (simple form
+# POSTs need no CORS preflight), which would let an arbitrary site write
+# files to arbitrary paths on this machine. POSTs are therefore rejected
+# unless both the Host header and the Origin header (when a browser sends
+# one) are local.
+LOCAL_HOSTNAMES = {"127.0.0.1", "localhost", "::1"}
+
+
+def _is_local_hostname(netloc):
+    """True if a Host header / Origin netloc refers to this machine."""
+    try:
+        hostname = urlsplit("//" + netloc).hostname
+    except ValueError:
+        return False
+    return hostname in LOCAL_HOSTNAMES
+
+
+@app.before_request
+def reject_cross_site_posts():
+    if request.method != "POST":
+        return None
+    origin = request.headers.get("Origin")
+    if not _is_local_hostname(request.host):
+        return jsonify({"status": "error",
+                        "output": "Rejected: non-local Host header."}), 403
+    # Non-browser clients (curl, scripts) send no Origin: allow them.
+    # "null" (sandboxed/opaque origins) is attacker-reachable: block it.
+    if origin is not None and (origin == "null"
+                               or not _is_local_hostname(urlsplit(origin).netloc)):
+        return jsonify({"status": "error",
+                        "output": "Rejected: cross-site request."}), 403
+    return None
+
 
 class SimpleLogger:
     """
     Custom logger for yt_dlp.
-    We append debug, warning, error messages for reference if needed.
+    Keeps only the most recent messages: yt-dlp emits a debug line per
+    fragment, so an unbounded list grows by megabytes on long downloads
+    while nothing ever reads more than the tail.
     """
+    MAX_MESSAGES = 200
+
     def __init__(self):
-        self.messages = []
+        self.messages = collections.deque(maxlen=self.MAX_MESSAGES)
 
     def debug(self, msg):
         self.messages.append("[DEBUG] " + msg)
@@ -149,15 +167,36 @@ def cleanup_stale_progress():
 
 def get_format_option(quality, audio_only, file_format):
     """
-    Return a suitable yt_dlp format string based on:
-    - quality (best, 480p, 720p, 1080p)
-    - audio_only
-    - file_format (default, mp4, webm, mkv, etc.)
+    Return a yt_dlp format selector for the given UI choices.
+
+    Every branch ends in a fallback chain ("bestvideo+bestaudio/best/..."),
+    because many videos lack a muxed format, an m4a audio track, or any
+    stream in the preferred container. Container preference (mp4/webm) is
+    expressed as the *first* alternative only; the actual output container
+    is enforced separately via merge_output_format in download_video().
+    MKV never appears in a selector: no site serves mkv source streams —
+    it is purely a merge target.
     """
     if audio_only:
-        return "bestaudio"
+        return "bestaudio/best"
 
-    return FORMAT_MAP.get(file_format.lower(), FORMAT_MAP["default"]).get(quality, "best")
+    height = QUALITY_HEIGHTS.get(quality)
+    h = f"[height<={height}]" if height else ""
+
+    file_format = (file_format or "").lower()
+    if file_format == "mp4":
+        preferred = f"bestvideo[ext=mp4]{h}+bestaudio[ext=m4a]"
+    elif file_format == "webm":
+        preferred = f"bestvideo[ext=webm]{h}+bestaudio[ext=webm]"
+    else:
+        preferred = None
+
+    chain = [preferred] if preferred else []
+    chain.append(f"bestvideo{h}+bestaudio")
+    if h:
+        chain.append(f"best{h}")
+    chain.append("best")
+    return "/".join(chain)
 
 
 def download_video(job_id, url, quality, audio_only, download_dir, file_format):
@@ -187,8 +226,7 @@ def download_video(job_id, url, quality, audio_only, download_dir, file_format):
     # If it's audio only, set the postprocessor to extract audio as MP3
     if audio_only:
         ydl_opts.update({
-            "extractaudio": True,
-            "audioformat": "mp3",
+            "format": fmt_option,
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
@@ -197,15 +235,25 @@ def download_video(job_id, url, quality, audio_only, download_dir, file_format):
         })
     else:
         ydl_opts["format"] = fmt_option
+        # Enforce the chosen container at merge time. This is the only way
+        # to get mkv output (no site serves mkv streams), and it keeps
+        # mp4/webm output correct when the selector fell back to a stream
+        # in a different container. yt-dlp falls back to mkv on codec
+        # incompatibility rather than failing.
+        if file_format and file_format.lower() in MERGE_CONTAINERS:
+            ydl_opts["merge_output_format"] = file_format.lower()
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
     except Exception as e:
-        # If any exception occurs, store error status
+        # If any exception occurs, store error status. updated_at matters:
+        # cleanup_stale_progress() treats a missing timestamp as infinitely
+        # old and would sweep this entry before the UI ever polls it.
         PROGRESS[job_id] = {
             "status": "error",
-            "error": str(e)
+            "error": str(e),
+            "updated_at": time.time(),
         }
 
 
