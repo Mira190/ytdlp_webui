@@ -3,28 +3,24 @@
 Deliberately-accepted debt, ranked by (risk × likelihood). Each entry says why
 it's accepted now and what would change that call.
 
-## 1. ffmpeg presence is assumed, never checked
-Merging video+audio, remuxing to mp4/webm/mkv, and MP3 extraction all require
-ffmpeg on PATH. The PyInstaller exe does not bundle it. A user without ffmpeg
-gets a mid-download yt-dlp error rather than an upfront warning.
-**Accepted because:** fixing well means bundling (~80 MB) or a startup check +
-download prompt — a product decision. **Revisit when:** any user report of
-"merge failed"; the startup check is ~10 lines (`shutil.which("ffmpeg")`) and
-would be the first thing to add (NEXT_STEPS #1).
+## 1. ffmpeg is warned about, but not bundled
+The UI now shows a bilingual banner when `shutil.which("ffmpeg")` finds
+nothing (re-checked per page load), and mid-download ffmpeg errors are
+classified to a clear message — but merge/remux/MP3 jobs still *fail* on
+machines without ffmpeg, and the PyInstaller exe does not bundle it (~80 MB).
+**Accepted because:** bundling is a release-size product decision.
+**Revisit when:** the release workflow is first exercised (NEXT_STEPS #2) —
+that's the natural moment to decide.
 
 ## 2. `PROGRESS` has no lock
 Writers: download threads (single dict-item assignments, atomic under the
-GIL). Sweeper: `cleanup_stale_progress` snapshots matching ids, then deletes.
-Worst interleaving: a hook re-adds a job after the sweep deleted it (needs a
->1h-stale timestamp on a still-writing job — effectively impossible) or a
-`del` on an already-deleted key (only if the sweep ran concurrently with
-itself; sweeps run on the request thread pool, so two simultaneous
-`/download` requests could race — the failure is an unhandled `KeyError` in a
-request handler).
-**Accepted because:** single local user; the race needs two simultaneous
-download-starts plus an hour-old terminal job. **Revisit when:** anything
-makes this multi-user, or for free during any other `main.py` edit: wrap the
-sweep loop in `try/except KeyError` or use `PROGRESS.pop(job_id, None)`.
+GIL). Sweeper: `cleanup_stale_progress` snapshots matching ids, then removes
+them with `PROGRESS.pop(job_id, None)` — concurrent sweeps can no longer
+raise. Remaining worst interleaving: a hook re-adds a job after the sweep
+removed it (needs a >1h-stale timestamp on a still-writing job — effectively
+impossible, and harmless: the entry just reappears until the next sweep).
+**Accepted because:** single local user; no observable failure mode left.
+**Revisit when:** anything makes this multi-user.
 
 ## 3. Progress entries survive only in memory
 Restarting the app forgets all jobs; the UI polling an old `job_id` shows
@@ -56,8 +52,10 @@ paths.
 ## 7. Frontend i18n dictionary duplicates label text in the template
 `index.html` hardcodes English labels *and* repeats them in the JS `i18n.en`
 map; `setLanguage` immediately overwrites the static text. Harmless
-duplication (~20 lines). **Revisit when:** a third language or any new label is
-added — then render labels from the dictionary only.
+duplication (~20 lines). New strings added in 2026-08-14 (banner, error
+kinds, job-not-found) live only in the dictionary, so the duplication no
+longer grows. **Revisit when:** a third language is added — then render all
+labels from the dictionary only.
 
 ## Paid off in this pass
 - 2021-era format table (deleted; was broken for 27/51 combinations).

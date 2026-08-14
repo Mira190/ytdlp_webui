@@ -6,14 +6,19 @@ is about *observable failure modes*.
 
 ## Will fail today
 
-1. **No ffmpeg on PATH → merge/remux/MP3 jobs fail mid-download** with a
-   yt-dlp error in the progress area. No upfront check exists. Most likely
-   real-world failure for exe users. (Fix sketch: NEXT_STEPS #1.)
-2. **App restart mid-download** → job gone; UI polling the old job_id shows
-   "Initializing..." forever (status `unknown` is rendered as initializing).
-   The stale `.part` file remains in the download directory.
-3. **Sites yt-dlp can't extract** (DRM, paywalls, unsupported) → error text
-   from yt-dlp shown raw in the UI; can be cryptic for non-technical users.
+1. **No ffmpeg on PATH → merge/remux/MP3 jobs still fail**, but the UI now
+   warns upfront (bilingual banner on page load, re-checked per refresh) and
+   the mid-download error is classified to a clear "install ffmpeg" message.
+   The failure itself remains until ffmpeg is bundled with the exe
+   (NEXT_STEPS #2).
+2. **App restart mid-download** → job gone; the UI now gives up after ~15
+   polls with a bilingual "job not found — app may have been restarted"
+   message instead of showing "Initializing..." forever. The stale `.part`
+   file still remains in the download directory.
+3. **Sites yt-dlp can't extract** (DRM, paywalls, unsupported) → now mapped
+   to short bilingual messages (unsupported URL / DRM / format unavailable /
+   network / ffmpeg), with the raw yt-dlp text in a collapsible details
+   block. Unrecognized errors still show raw text.
 4. **Browsers' directory picker cannot supply a real path** (platform
    limitation); the "Choose" button inserts only the folder *name* and warns.
    Users must type full paths. Windows-first UX debt.
@@ -22,8 +27,14 @@ is about *observable failure modes*.
 
 5. **End-to-end downloads in CI.** All format-selection evidence is offline
    against synthetic catalogs through yt-dlp's real engine. A live YouTube
-   download has not been run in this environment (no egress to YouTube).
-   Risk: fixtures could drift from reality. Mitigation path in NEXT_STEPS #4.
+   download has not been run in this environment — confirmed empirically
+   2026-08-14: `refresh_fixtures.py` fails with a proxy 403 on YouTube API
+   tunnels. The script is ready to close the fixtures-drift gap on any
+   network-enabled machine (NEXT_STEPS #1).
+5a. **New frontend flows are browser-untested.** The ffmpeg banner, error
+   details block, and job-not-found timeout are JS-syntax-checked
+   (`node --check` on the rendered script) and covered server-side, but no
+   real browser session has clicked through them (NEXT_STEPS #3).
 6. **The PyInstaller exe.** The release workflow has never run on a real tag
    push (added this cycle, no tag exists yet). `--add-data "templates;templates"`
    syntax is Windows-correct, but the built exe is untested. First tag push
@@ -42,5 +53,7 @@ is about *observable failure modes*.
    Not a real optimization; the table was deleted for correctness reasons.
 10. **PROGRESS race window** (concurrent sweeps deleting the same key) —
     theoretically reachable via two simultaneous `/download` requests with an
-    hour-stale terminal job present; not reproduced under test. Documented
-    rather than locked (docs/technical-debt.md #2).
+    hour-stale terminal job present; not reproduced under test. The sweep now
+    uses `PROGRESS.pop(job_id, None)`, removing the KeyError failure mode;
+    the (harmless) hook-re-adds-after-sweep interleaving remains documented
+    in docs/technical-debt.md #2.

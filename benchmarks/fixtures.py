@@ -11,6 +11,8 @@ fails here fails for real users:
 - progressive_only: sites whose extractors return only muxed
   (video+audio) files — no video-only/audio-only streams to merge.
 """
+import json
+import os
 
 
 def _f(fid, ext, vcodec, acodec, height=None, abr=None):
@@ -59,3 +61,11 @@ CATALOGS = {
     "youtube_no_m4a": youtube_no_m4a,
     "progressive_only": progressive_only,
 }
+
+# Catalogs captured from real videos by refresh_fixtures.py (optional file;
+# see that script). Merged in so the benchmark and tests cover them too.
+_live_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "fixtures_live.json")
+if os.path.exists(_live_path):
+    with open(_live_path) as _fh:
+        CATALOGS.update(json.load(_fh))

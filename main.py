@@ -1,5 +1,6 @@
 import collections
 import os
+import shutil
 import threading
 import time
 import uuid
@@ -37,6 +38,37 @@ MERGE_CONTAINERS = ("mp4", "webm", "mkv")
 # unless both the Host header and the Origin header (when a browser sends
 # one) are local.
 LOCAL_HOSTNAMES = {"127.0.0.1", "localhost", "::1"}
+
+
+def has_ffmpeg():
+    """Merging, mp4/webm/mkv output, and MP3 extraction all need ffmpeg.
+    Checked per page load (cheap) so installing ffmpeg takes effect on
+    refresh, without restarting the app."""
+    return shutil.which("ffmpeg") is not None
+
+
+# Ordered substring probes mapping yt-dlp error text to a stable error_kind
+# key the frontend can translate. First match wins; keep specific needles
+# (ffmpeg, DRM) above the broad network ones.
+ERROR_KINDS = (
+    ("ffmpeg_missing", ("ffmpeg is not installed",
+                        "ffprobe and ffmpeg not found",
+                        "ffmpeg not found")),
+    ("drm", ("drm",)),
+    ("unsupported_url", ("unsupported url", "is not a valid url")),
+    ("format_unavailable", ("requested format is not available",)),
+    ("network", ("unable to download", "connection", "timed out",
+                 "temporary failure", "getaddrinfo", "network")),
+)
+
+
+def classify_download_error(message):
+    """Map a raw yt-dlp error message to an error_kind key, or 'other'."""
+    lowered = (message or "").lower()
+    for kind, needles in ERROR_KINDS:
+        if any(n in lowered for n in needles):
+            return kind
+    return "other"
 
 
 def _is_local_hostname(netloc):
@@ -133,9 +165,11 @@ def progress_hook_factory(job_id):
 
         elif status == "error":
             # If there is an error, store it
+            error = d.get("error", "Unknown error")
             PROGRESS[job_id] = {
                 "status": "error",
-                "error": d.get("error", "Unknown error"),
+                "error": error,
+                "error_kind": classify_download_error(error),
                 "updated_at": time.time(),
             }
 
@@ -162,7 +196,8 @@ def cleanup_stale_progress():
         and data.get("updated_at", 0) < cutoff
     ]
     for job_id in stale_ids:
-        del PROGRESS[job_id]
+        # pop, not del: two concurrent sweeps may target the same key
+        PROGRESS.pop(job_id, None)
 
 
 def get_format_option(quality, audio_only, file_format):
@@ -253,6 +288,7 @@ def download_video(job_id, url, quality, audio_only, download_dir, file_format):
         PROGRESS[job_id] = {
             "status": "error",
             "error": str(e),
+            "error_kind": classify_download_error(str(e)),
             "updated_at": time.time(),
         }
 
@@ -265,7 +301,8 @@ def index():
     """
     return render_template('index.html',
                            quality_options=["best", "480p", "720p", "1080p"],
-                           format_options=["default", "mp4", "webm", "mkv"])
+                           format_options=["default", "mp4", "webm", "mkv"],
+                           ffmpeg_ok=has_ffmpeg())
 
 
 @app.route('/download', methods=['POST'])

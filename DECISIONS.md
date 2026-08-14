@@ -2,6 +2,30 @@
 
 Record of consequential choices and their reasoning. Newest first.
 
+## 2026-08-14 — UX/reliability pass (NEXT_STEPS items 1–4)
+
+1. **ffmpeg check per page load, not at boot.** `has_ffmpeg()` runs in the
+   `/` route (a `shutil.which` call, microseconds) so installing ffmpeg takes
+   effect on refresh without restarting — better for exe users who can't
+   easily restart from a terminal.
+2. **Error classification server-side, translation client-side.** The server
+   attaches a stable `error_kind` key (substring probes over the yt-dlp
+   message, ordered specific→broad); the frontend owns the bilingual copy.
+   Keeps language concerns in one place and the API language-neutral.
+   Raw error text is rendered with `textContent` only — yt-dlp errors can
+   embed content derived from the requested URL, so treating them as HTML
+   would be an XSS vector.
+3. **Live fixtures as an optional JSON overlay** (`fixtures_live.json`,
+   auto-merged into `CATALOGS`) rather than regenerating `fixtures.py`:
+   synthetic catalogs stay readable and reviewable; real captures can be
+   committed or kept local. Confirmed this environment cannot reach YouTube
+   (proxy 403), so the refresh script ships verified-but-unrun against real
+   videos.
+4. **Frontend gives up on `unknown` after 15 polls** (~15 s). Chosen over
+   treating the first `unknown` as fatal because a just-started job can
+   legitimately report `started`→hook-lag gaps; 15 s is far beyond any
+   legitimate gap.
+
 ## 2026-08-06 — repository-wide review pass
 
 1. **Replace the format table with generated fallback chains + merge

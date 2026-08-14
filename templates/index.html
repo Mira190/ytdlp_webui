@@ -24,6 +24,13 @@
         >
           YT-DLP Downloader
         </h1>
+        {% if not ffmpeg_ok %}
+        <!-- Text filled in by setLanguage() so it follows the language toggle -->
+        <div
+          id="ffmpegWarning"
+          class="mb-4 p-3 rounded-lg bg-yellow-100 border border-yellow-300 text-yellow-800 text-sm"
+        ></div>
+        {% endif %}
         <form id="downloadForm" class="space-y-4">
           <div>
             <label
@@ -180,6 +187,20 @@
           completed: "Download Completed",
           initializing: "Initializing...",
           errorPrefix: "Error: ",
+          detailsLabel: "Technical details",
+          jobNotFound:
+            "Job not found — the app may have been restarted. Please try again.",
+          ffmpegWarning:
+            'ffmpeg was not found on this system. Merging video+audio, MP4/WebM/MKV output, and MP3 extraction will fail. <a class="underline font-medium" href="https://ffmpeg.org/download.html" target="_blank" rel="noopener">Download ffmpeg</a> and restart, or refresh this page after installing.',
+          errorKinds: {
+            ffmpeg_missing:
+              "ffmpeg is required for this download but was not found. Install ffmpeg and try again.",
+            drm: "This video is DRM-protected and cannot be downloaded.",
+            unsupported_url: "This site or URL is not supported.",
+            format_unavailable:
+              "The requested quality/format is not available for this video.",
+            network: "Network error — check your connection and try again.",
+          },
         },
         zh: {
           title: "YT-DLP 下载器",
@@ -197,6 +218,17 @@
           completed: "下载完成",
           initializing: "初始化...",
           errorPrefix: "错误：",
+          detailsLabel: "技术细节",
+          jobNotFound: "任务不存在——应用可能已重启，请重新提交下载。",
+          ffmpegWarning:
+            '未检测到 ffmpeg。合并音视频、MP4/WebM/MKV 输出和 MP3 提取将失败。请<a class="underline font-medium" href="https://ffmpeg.org/download.html" target="_blank" rel="noopener">下载 ffmpeg</a>后重启，或安装后刷新此页面。',
+          errorKinds: {
+            ffmpeg_missing: "此下载需要 ffmpeg，但未找到。请安装 ffmpeg 后重试。",
+            drm: "该视频受 DRM 保护，无法下载。",
+            unsupported_url: "不支持该网站或链接。",
+            format_unavailable: "该视频没有所请求的清晰度/格式。",
+            network: "网络错误——请检查网络连接后重试。",
+          },
         },
       };
 
@@ -221,6 +253,9 @@
         document.getElementById("url").placeholder = i18n[lang].placeholderUrl;
         document.getElementById("download_dir").placeholder =
           i18n[lang].placeholderDir;
+        // Banner only exists when the server did not find ffmpeg
+        const ffmpegWarning = document.getElementById("ffmpegWarning");
+        if (ffmpegWarning) ffmpegWarning.innerHTML = i18n[lang].ffmpegWarning;
       }
 
       const toggleLangBtn = document.getElementById("toggleLangBtn");
@@ -292,14 +327,43 @@
           });
       });
 
+      // Show a translated error with the raw yt-dlp text in a collapsible
+      // block. Raw text goes through textContent: error messages can embed
+      // content from the requested URL, so it must never be parsed as HTML.
+      function showError(kind, rawError) {
+        const dict = i18n[currentLang];
+        const friendly = kind && dict.errorKinds[kind];
+        progressText.innerText =
+          dict.errorPrefix + (friendly || rawError || "Unknown error");
+        outputDiv.innerText = "";
+        if (friendly && rawError) {
+          const details = document.createElement("details");
+          const summary = document.createElement("summary");
+          summary.textContent = dict.detailsLabel;
+          summary.className = "cursor-pointer text-sm text-gray-500";
+          const raw = document.createElement("div");
+          raw.textContent = rawError;
+          raw.className = "text-sm mt-1";
+          details.appendChild(summary);
+          details.appendChild(raw);
+          outputDiv.appendChild(details);
+        }
+      }
+
       // Poll progress from the server using job_id
       function pollProgress(job_id) {
+        // Consecutive polls answered "unknown": the job vanished (e.g. the
+        // app was restarted). Give up after a bounded number instead of
+        // showing "Initializing..." forever.
+        let unknownPolls = 0;
+        const MAX_UNKNOWN_POLLS = 15;
         const interval = setInterval(() => {
           fetch("/progress?job_id=" + job_id)
             .then((response) => response.json())
             .then((data) => {
               // We expect data to contain {status, percent, speed, eta} if status = 'downloading'
               if (data.status === "downloading") {
+                unknownPolls = 0;
                 let percent = data.percent || 0;
                 // Ensure percent is between 0 and 100
                 if (percent < 0) percent = 0;
@@ -323,18 +387,25 @@
                 submitBtn.innerText = i18n[currentLang].startBtn;
               } else if (data.status === "error") {
                 // An error occurred
-                progressText.innerText =
-                  i18n[currentLang].errorPrefix +
-                  (data.error || "Unknown error");
+                showError(data.error_kind, data.error);
                 clearInterval(interval);
                 submitBtn.disabled = false;
                 submitBtn.innerText = i18n[currentLang].startBtn;
+              } else if (data.status === "unknown") {
+                // Job the server doesn't know about (restarted app?)
+                unknownPolls++;
+                if (unknownPolls >= MAX_UNKNOWN_POLLS) {
+                  progressText.innerText = i18n[currentLang].jobNotFound;
+                  clearInterval(interval);
+                  submitBtn.disabled = false;
+                  submitBtn.innerText = i18n[currentLang].startBtn;
+                } else {
+                  progressText.innerText = i18n[currentLang].initializing;
+                }
               } else {
-                // For status = 'started', 'init', or 'unknown'
-                progressText.innerText =
-                  currentLang === "zh"
-                    ? i18n.zh.initializing
-                    : i18n.en.initializing;
+                // For status = 'started' or 'init'
+                unknownPolls = 0;
+                progressText.innerText = i18n[currentLang].initializing;
               }
             })
             .catch((err) => {

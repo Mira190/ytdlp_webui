@@ -67,6 +67,18 @@ transient waste per active download, not a permanent leak.
 
 ## 6. Test/lint status
 
-Baseline: 0 tests, no linter. Improved: 68 pytest tests (2.4 s, fully
+Baseline: 0 tests, no linter. Improved: 82 pytest tests (~3 s, fully
 offline) + pyflakes, both green and enforced in CI alongside the benchmark
-(CI fails if any format cell regresses).
+(CI fails if any format cell regresses). The rendered frontend script is
+additionally syntax-checked with `node --check` during development (not in
+CI — Node isn't guaranteed on runners).
+
+## 7. UX pass additions (2026-08-14, qualitative)
+
+Not performance-measurable, verified by tests: ffmpeg-missing banner
+(shown/hidden per `shutil.which`, 2 tests), error classification (11
+parametrized message→kind cases + 2 integration paths), fixture overlay
+mechanism (51/51 without `fixtures_live.json`, 68/68 with a sample overlay).
+Live-fixture capture confirmed impossible from this environment (proxy 403
+to YouTube) — recorded as a negative result, script ready for a
+network-enabled machine.

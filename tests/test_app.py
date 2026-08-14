@@ -150,6 +150,48 @@ def test_quality_cap_respected():
     assert chosen == "244+251"  # 480p video, not 1080p
 
 
+# ------------------------------------------------- ffmpeg check + errors
+
+def test_ffmpeg_banner_shown_when_missing(client, monkeypatch):
+    monkeypatch.setattr(main, "has_ffmpeg", lambda: False)
+    assert b'id="ffmpegWarning"' in client.get("/").data
+
+
+def test_ffmpeg_banner_absent_when_present(client, monkeypatch):
+    monkeypatch.setattr(main, "has_ffmpeg", lambda: True)
+    assert b'id="ffmpegWarning"' not in client.get("/").data
+
+
+@pytest.mark.parametrize("message,kind", [
+    ("ERROR: Unsupported URL: https://example.com/x", "unsupported_url"),
+    ("'htp://x' is not a valid URL.", "unsupported_url"),
+    ("ERROR: [youtube] abc: Requested format is not available", "format_unavailable"),
+    ("This video is DRM protected", "drm"),
+    ("ERROR: unable to download video data: HTTP Error 403", "network"),
+    ("<urlopen error [Errno -3] Temporary failure in name resolution>", "network"),
+    ("You have requested merging of multiple formats but ffmpeg is not installed.", "ffmpeg_missing"),
+    ("ERROR: Postprocessing: ffprobe and ffmpeg not found. Please install", "ffmpeg_missing"),
+    ("something entirely novel", "other"),
+    ("", "other"),
+    (None, "other"),
+])
+def test_classify_download_error(message, kind):
+    assert main.classify_download_error(message) == kind
+
+
+def test_error_entries_carry_error_kind(monkeypatch):
+    monkeypatch.setattr(
+        main.yt_dlp, "YoutubeDL",
+        lambda opts: (_ for _ in ()).throw(RuntimeError("Unsupported URL: x")))
+    main.download_video("jobK", "https://example.invalid/v",
+                        "best", False, "", "default")
+    entry = main.PROGRESS["jobK"]
+    assert entry["error_kind"] == "unsupported_url"
+    hook = main.progress_hook_factory("jobH")
+    hook({"status": "error", "error": "timed out"})
+    assert main.PROGRESS["jobH"]["error_kind"] == "network"
+
+
 # --------------------------------------------------------------- logger
 
 def test_logger_memory_is_bounded():
