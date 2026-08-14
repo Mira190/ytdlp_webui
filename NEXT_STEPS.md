@@ -16,10 +16,6 @@ that judgment.
    (KNOWN_FAILURES #6). While there, decide whether to bundle ffmpeg with the
    exe — the UI now warns when it's missing, but bundling would remove the
    failure mode entirely for exe users.
-3. **Manual browser pass over the new frontend paths** (ffmpeg banner
-   language toggle, error details block, job-not-found timeout). They are
-   JS-syntax-checked and server-side tested, but no real browser has
-   exercised the DOM flows.
 
 ## Done since the ranking was written (2026-08-14)
 
@@ -34,6 +30,9 @@ that judgment.
   blocked by environment (see #1 above).
 - ~~`PROGRESS.pop` hardening~~ — sweep no longer able to KeyError under
   concurrent sweeps (was technical-debt #2's cheap mitigation).
+- ~~Browser pass over new frontend flows~~ — 11/11 checks in headless
+  Chromium via Playwright (banner + language toggle, real failed download →
+  friendly error + details, job-not-found timeout with polling stop).
 
 ## Below the line (explicitly deferred)
 

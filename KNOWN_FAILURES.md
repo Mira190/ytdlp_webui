@@ -31,10 +31,13 @@ is about *observable failure modes*.
    2026-08-14: `refresh_fixtures.py` fails with a proxy 403 on YouTube API
    tunnels. The script is ready to close the fixtures-drift gap on any
    network-enabled machine (NEXT_STEPS #1).
-5a. **New frontend flows are browser-untested.** The ffmpeg banner, error
-   details block, and job-not-found timeout are JS-syntax-checked
-   (`node --check` on the rendered script) and covered server-side, but no
-   real browser session has clicked through them (NEXT_STEPS #3).
+5a. ~~New frontend flows are browser-untested~~ — **verified 2026-08-14** in
+   headless Chromium (Playwright): banner en/zh toggle, friendly error +
+   details block on a real failed download, job-not-found after 15 polls
+   with polling confirmed stopped, submit button re-enabled in both paths
+   (11/11 checks). Bonus confirmation: with the CDN unreachable the page
+   rendered unstyled but fully functional — the graceful degradation
+   docs/technical-debt.md #4 predicted.
 6. **The PyInstaller exe.** The release workflow has never run on a real tag
    push (added this cycle, no tag exists yet). `--add-data "templates;templates"`
    syntax is Windows-correct, but the built exe is untested. First tag push
