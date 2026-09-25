@@ -116,7 +116,7 @@ def progress_hook_factory(job_id):
                 total_bytes=total,
                 speed=d.get("speed") or 0,
                 eta=d.get("eta") or 0,
-                filename=os.path.basename(d.get("filename", "")),
+                filename=os.path.basename(d.get("filename") or ""),
             )
 
         elif status == "finished":
@@ -135,12 +135,19 @@ def postprocessor_hook_factory(job_id):
     return hook
 
 
-def build_format_options(quality, audio_only, file_format):
+def build_format_options(quality, audio_only, file_format, ffmpeg_available=None):
     """
     Return the format-related yt_dlp options to merge into ydl_opts for the
     given quality (see QUALITY_OPTIONS), audio_only flag and file_format
     (see FORMAT_OPTIONS).
+
+    Without ffmpeg, yt_dlp cannot merge separate video and audio streams and
+    aborts if asked to, so in that case only single-file ("progressive")
+    formats are requested. ffmpeg_available defaults to FFMPEG_AVAILABLE.
     """
+    if ffmpeg_available is None:
+        ffmpeg_available = FFMPEG_AVAILABLE
+
     if audio_only:
         return {
             "format": "bestaudio/best",
@@ -155,6 +162,11 @@ def build_format_options(quality, audio_only, file_format):
 
     height = QUALITY_HEIGHTS.get(quality)
     h = f"[height<={height}]" if height else ""
+
+    if not ffmpeg_available:
+        if file_format in ("mp4", "webm"):
+            return {"format": f"best[ext={file_format}]{h}/best{h}"}
+        return {"format": f"best{h}"}
 
     if file_format == "mp4":
         return {

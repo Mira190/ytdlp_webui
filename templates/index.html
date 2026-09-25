@@ -17,8 +17,8 @@
       <h1 data-i18n="title">YT-DLP Downloader</h1>
       {% if not ffmpeg_available %}
       <div class="banner-warning" data-i18n="ffmpegMissing">
-        ffmpeg not found. Audio extraction and merged video formats will fail. Install ffmpeg and
-        add it to PATH.
+        ffmpeg not found. MP3 extraction will fail and video downloads are limited to single-file
+        formats (usually 720p or lower). Install ffmpeg and add it to PATH.
       </div>
       {% endif %}
       <form id="downloadForm">
@@ -91,7 +91,7 @@
           title: "YT-DLP Downloader",
           switchTo: "Switch to Chinese",
           ffmpegMissing:
-            "ffmpeg not found. Audio extraction and merged video formats will fail. Install ffmpeg and add it to PATH.",
+            "ffmpeg not found. MP3 extraction will fail and video downloads are limited to single-file formats (usually 720p or lower). Install ffmpeg and add it to PATH.",
           linkLabel: "Video URL",
           placeholderUrl: "Enter video URL",
           qualityLabel: "Video Quality",
@@ -117,7 +117,7 @@
           title: "YT-DLP 下载器",
           switchTo: "切换到英语",
           ffmpegMissing:
-            "未找到 ffmpeg。音频提取和需要合并的视频格式将会失败。请安装 ffmpeg 并将其加入 PATH。",
+            "未找到 ffmpeg。无法提取 MP3，视频只能下载单文件格式（通常不超过 720p）。请安装 ffmpeg 并将其加入 PATH。",
           linkLabel: "视频链接",
           placeholderUrl: "请输入视频链接",
           qualityLabel: "视频质量",

@@ -1,16 +1,13 @@
 """Tests for main.py. No network or ffmpeg needed: yt_dlp.YoutubeDL is faked."""
 
 import os
-import sys
 import threading
 import time
 
 import pytest
 import yt_dlp
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import main  # noqa: E402
+import main
 
 WAIT_TIMEOUT = 5
 
@@ -138,10 +135,36 @@ def test_build_format_options_audio_only():
     ],
 )
 def test_build_format_options_video(file_format, quality, expected_format, expected_merge):
-    opts = main.build_format_options(quality, False, file_format)
+    opts = main.build_format_options(quality, False, file_format, ffmpeg_available=True)
     assert opts["format"] == expected_format
     assert opts.get("merge_output_format") == expected_merge
     assert "postprocessors" not in opts
+
+
+@pytest.mark.parametrize(
+    ("file_format", "quality", "expected_format"),
+    [
+        ("mp4", "best", "best[ext=mp4]/best"),
+        ("mp4", "720p", "best[ext=mp4][height<=720]/best[height<=720]"),
+        ("webm", "best", "best[ext=webm]/best"),
+        ("mkv", "480p", "best[height<=480]"),
+        ("default", "best", "best"),
+        ("default", "1080p", "best[height<=1080]"),
+    ],
+)
+def test_build_format_options_video_without_ffmpeg(file_format, quality, expected_format):
+    """Without ffmpeg only single-file formats are requested; nothing to merge."""
+    opts = main.build_format_options(quality, False, file_format, ffmpeg_available=False)
+    assert opts == {"format": expected_format}
+
+
+def test_build_format_options_defaults_to_detected_ffmpeg(monkeypatch):
+    monkeypatch.setattr(main, "FFMPEG_AVAILABLE", False)
+    assert main.build_format_options("best", False, "default") == {"format": "best"}
+    monkeypatch.setattr(main, "FFMPEG_AVAILABLE", True)
+    assert main.build_format_options("best", False, "default") == {
+        "format": "bestvideo+bestaudio/best"
+    }
 
 
 # --- /download validation ---------------------------------------------------
