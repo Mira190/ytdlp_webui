@@ -106,27 +106,27 @@ def test_build_format_options_audio_only():
             "mp4",
             "best",
             "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
-            "mp4",
+            "mp4/mkv",
         ),
         (
             "mp4",
             "720p",
             "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]"
             "/bestvideo[height<=720]+bestaudio/best[height<=720]",
-            "mp4",
+            "mp4/mkv",
         ),
         (
             "webm",
             "best",
             "bestvideo[ext=webm]+bestaudio[ext=webm]/bestvideo+bestaudio/best",
-            "webm",
+            "webm/mkv",
         ),
         (
             "webm",
             "720p",
             "bestvideo[ext=webm][height<=720]+bestaudio[ext=webm]"
             "/bestvideo[height<=720]+bestaudio/best[height<=720]",
-            "webm",
+            "webm/mkv",
         ),
         ("mkv", "best", "bestvideo+bestaudio/best", "mkv"),
         ("mkv", "720p", "bestvideo[height<=720]+bestaudio/best[height<=720]", "mkv"),
@@ -235,7 +235,13 @@ def test_hook_sequence_reports_processing_until_download_returns(client, tmp_pat
         seen.append(only_job())
         ydl.postprocess({"status": "started", "postprocessor": "Merger"})
         seen.append(only_job())
-        ydl.postprocess({"status": "finished", "postprocessor": "Merger"})
+        ydl.postprocess(
+            {
+                "status": "finished",
+                "postprocessor": "Merger",
+                "info_dict": {"filepath": os.path.join(str(tmp_path), "video.mp4")},
+            }
+        )
         seen.append(only_job())
 
     fake_ydl.behaviour = behaviour
@@ -256,10 +262,12 @@ def test_hook_sequence_reports_processing_until_download_returns(client, tmp_pat
     assert pp_started["status"] == "processing"
     assert pp_started["postprocessor"] == "Merger"
     assert pp_finished["status"] == "processing"
+    assert pp_finished["filename"] == "video.mp4"  # the merged output, not a fragment
 
     assert final["status"] == "finished"
     assert final["percent"] == 100
     assert final["eta"] == 0
+    assert final["filename"] == "video.mp4"  # context survives the final transition
 
 
 def test_download_error_is_recorded_with_timestamp(client, tmp_path, fake_ydl):
@@ -274,6 +282,93 @@ def test_download_error_is_recorded_with_timestamp(client, tmp_path, fake_ydl):
     assert final["status"] == "error"
     assert "boom" in final["error"]
     assert final["updated_at"] >= before
+
+
+def test_setup_failure_is_recorded_as_error(client, tmp_path, fake_ydl, monkeypatch):
+    """A failure before the download starts must not leave the job at 'started'."""
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("bad options")
+
+    monkeypatch.setattr(main, "build_format_options", broken)
+    job_id = start(client, tmp_path).get_json()["job_id"]
+    final = wait_for_job(job_id)
+
+    assert final["status"] == "error"
+    assert "bad options" in final["error"]
+
+
+# --- /download: ffmpeg, paths, cross-site -----------------------------------
+
+
+def test_audio_only_without_ffmpeg_is_rejected(client, tmp_path, fake_ydl, monkeypatch):
+    monkeypatch.setattr(main, "FFMPEG_AVAILABLE", False)
+    response = start(client, tmp_path, audio_only="on")
+    assert response.status_code == 400
+    assert "ffmpeg" in response.get_json()["output"]
+    assert fake_ydl.instances == []
+
+
+def test_audio_only_with_ffmpeg_starts(client, tmp_path, fake_ydl, monkeypatch):
+    monkeypatch.setattr(main, "FFMPEG_AVAILABLE", True)
+    job_id = start(client, tmp_path, audio_only="on").get_json()["job_id"]
+    assert wait_for_job(job_id)["status"] == "finished"
+    (ydl,) = fake_ydl.instances
+    assert ydl.opts["postprocessors"][0]["key"] == "FFmpegExtractAudio"
+
+
+def test_download_dir_expands_home(client, tmp_path, fake_ydl, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    job_id = start(client, tmp_path, download_dir="~/clips").get_json()["job_id"]
+    wait_for_job(job_id)
+    (ydl,) = fake_ydl.instances
+    assert ydl.opts["outtmpl"].startswith(os.path.join(str(tmp_path), "clips"))
+    assert os.path.isdir(os.path.join(str(tmp_path), "clips"))
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Sec-Fetch-Site": "cross-site"},
+        {"Sec-Fetch-Site": "same-site"},
+        {"Origin": "https://evil.example"},
+    ],
+)
+def test_cross_site_download_is_rejected(client, tmp_path, fake_ydl, headers):
+    data = {"url": "https://example.com/watch?v=abc", "download_dir": str(tmp_path)}
+    response = client.post("/download", data=data, headers=headers)
+    assert response.status_code == 403
+    assert response.get_json()["status"] == "error"
+    assert main.PROGRESS == {}
+    assert fake_ydl.instances == []
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {"Sec-Fetch-Site": "same-origin"},
+        {"Sec-Fetch-Site": "none"},
+        {"Sec-Fetch-Site": "same-origin", "Origin": "http://localhost"},
+    ],
+)
+def test_same_origin_download_is_allowed(client, tmp_path, fake_ydl, headers):
+    data = {"url": "https://example.com/watch?v=abc", "download_dir": str(tmp_path)}
+    response = client.post("/download", data=data, headers=headers)
+    assert response.status_code == 200
+    wait_for_job(response.get_json()["job_id"])
+
+
+# --- configuration ----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("8080", 8080), (5000, 5000), ("", 5000), ("8o80", 5000), ("0", 5000), ("70000", 5000)],
+)
+def test_read_port(value, expected):
+    assert main.read_port(value) == expected
 
 
 # --- /progress --------------------------------------------------------------

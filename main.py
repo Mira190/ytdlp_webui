@@ -18,7 +18,24 @@ app = Flask(__name__, template_folder=TEMPLATES_DIR, static_folder=STATIC_DIR)
 # The server can write to arbitrary local paths, so it only ever listens on
 # the loopback interface. The host is intentionally not configurable.
 HOST = "127.0.0.1"
-PORT = int(os.environ.get("YTDLP_WEBUI_PORT", "5000"))
+DEFAULT_PORT = 5000
+
+
+def read_port(value):
+    """Parse a port from the environment, falling back to DEFAULT_PORT."""
+    try:
+        port = int(value)
+        if 1 <= port <= 65535:
+            return port
+    except (TypeError, ValueError):
+        pass
+    logging.getLogger(__name__).warning(
+        "Ignoring invalid YTDLP_WEBUI_PORT=%r, using %d", value, DEFAULT_PORT
+    )
+    return DEFAULT_PORT
+
+
+PORT = read_port(os.environ.get("YTDLP_WEBUI_PORT", DEFAULT_PORT))
 
 DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Downloads")
 
@@ -40,26 +57,18 @@ PROGRESS_LOCK = threading.Lock()
 # forever.
 PROGRESS_TTL_SECONDS = 3600
 
-# Statuses whose updates are merged into the existing entry (so fields such
-# as the filename survive), rather than replacing it.
-MERGED_STATUSES = ("downloading", "processing")
-
 YTDLP_LOGGER = logging.getLogger("ytdlp_webui.yt_dlp")
 
 
 def set_progress(job_id, **fields):
     """
     Record progress for job_id under the lock. Always stamps updated_at.
-    downloading/processing updates are merged into the existing entry;
-    any other status replaces it.
+    Fields are merged into the existing entry so context such as the
+    filename survives status transitions.
     """
     fields["updated_at"] = time.time()
     with PROGRESS_LOCK:
-        existing = PROGRESS.get(job_id)
-        if existing is not None and fields.get("status") in MERGED_STATUSES:
-            existing.update(fields)
-        else:
-            PROGRESS[job_id] = fields
+        PROGRESS.setdefault(job_id, {}).update(fields)
 
 
 def get_progress_snapshot(job_id):
@@ -126,11 +135,21 @@ def progress_hook_factory(job_id):
 
 
 def postprocessor_hook_factory(job_id):
-    """Create a yt_dlp postprocessor hook that marks job_id as processing."""
+    """
+    Create a yt_dlp postprocessor hook for job_id. yt_dlp sends "started"
+    and "finished" for each postprocessor (merger, audio extraction, ...).
+    """
 
     def hook(d):
-        if d.get("status") in ("started", "processing"):
+        status = d.get("status")
+        if status == "started":
             set_progress(job_id, status="processing", postprocessor=d.get("postprocessor"))
+        elif status == "finished":
+            # The postprocessor's output (e.g. the merged file) is the name
+            # the user will find on disk, unlike the per-stream fragments.
+            filepath = (d.get("info_dict") or {}).get("filepath")
+            if filepath:
+                set_progress(job_id, filename=os.path.basename(filepath))
 
     return hook
 
@@ -168,15 +187,18 @@ def build_format_options(quality, audio_only, file_format, ffmpeg_available=None
             return {"format": f"best[ext={file_format}]{h}/best{h}"}
         return {"format": f"best{h}"}
 
+    # The fallback selectors may pick codecs the preferred container cannot
+    # hold (e.g. VP9+Opus for mp4), so mkv is listed as the second choice:
+    # yt_dlp uses the first listed extension compatible with the streams.
     if file_format == "mp4":
         return {
             "format": f"bestvideo[ext=mp4]{h}+bestaudio[ext=m4a]/bestvideo{h}+bestaudio/best{h}",
-            "merge_output_format": "mp4",
+            "merge_output_format": "mp4/mkv",
         }
     if file_format == "webm":
         return {
             "format": f"bestvideo[ext=webm]{h}+bestaudio[ext=webm]/bestvideo{h}+bestaudio/best{h}",
-            "merge_output_format": "webm",
+            "merge_output_format": "webm/mkv",
         }
     if file_format == "mkv":
         return {
@@ -191,16 +213,17 @@ def download_video(job_id, url, quality, audio_only, download_dir, file_format):
     Download url with yt_dlp. Runs in a separate thread and reports progress
     through set_progress(). The download directory must already exist.
     """
-    ydl_opts = {
-        "logger": YTDLP_LOGGER,
-        "outtmpl": os.path.join(download_dir, "%(title)s.%(ext)s"),
-        "noplaylist": True,
-        "progress_hooks": [progress_hook_factory(job_id)],
-        "postprocessor_hooks": [postprocessor_hook_factory(job_id)],
-    }
-    ydl_opts.update(build_format_options(quality, audio_only, file_format))
-
+    # Everything is inside the try so that no failure can leave the job
+    # stuck at "started" with the UI polling forever.
     try:
+        ydl_opts = {
+            "logger": YTDLP_LOGGER,
+            "outtmpl": os.path.join(download_dir, "%(title)s.%(ext)s"),
+            "noplaylist": True,
+            "progress_hooks": [progress_hook_factory(job_id)],
+            "postprocessor_hooks": [postprocessor_hook_factory(job_id)],
+        }
+        ydl_opts.update(build_format_options(quality, audio_only, file_format))
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
     except Exception as e:  # includes yt_dlp.utils.DownloadError
@@ -212,6 +235,20 @@ def download_video(job_id, url, quality, audio_only, download_dir, file_format):
 
 def error_response(message, code=400):
     return jsonify({"status": "error", "output": message}), code
+
+
+def is_cross_site_request(req):
+    """
+    True if a browser sent req from another site. The server only listens on
+    loopback, but any web page the user visits can still make the browser
+    POST to it, so /download must reject requests that don't come from the
+    app's own origin. Non-browser clients send neither header and are allowed.
+    """
+    fetch_site = req.headers.get("Sec-Fetch-Site")
+    if fetch_site and fetch_site not in ("same-origin", "none"):
+        return True
+    origin = req.headers.get("Origin")
+    return bool(origin) and origin != req.host_url.rstrip("/")
 
 
 @app.route("/")
@@ -235,11 +272,15 @@ def start_download():
     Validates the request, starts the download in a background thread and
     returns its job_id.
     """
+    if is_cross_site_request(request):
+        return error_response("Cross-site requests are not allowed.", 403)
+
     url = request.form.get("url", "").strip()
     quality = request.form.get("quality", "best")
     file_format = request.form.get("file_format", "default")
     audio_only = request.form.get("audio_only") == "on"
     download_dir = request.form.get("download_dir", "").strip() or DEFAULT_DOWNLOAD_DIR
+    download_dir = os.path.abspath(os.path.expanduser(download_dir))
 
     if not url:
         return error_response("Please provide a valid video URL.")
@@ -249,6 +290,8 @@ def start_download():
         return error_response(f"Invalid quality: {quality}")
     if file_format not in FORMAT_OPTIONS:
         return error_response(f"Invalid file format: {file_format}")
+    if audio_only and not FFMPEG_AVAILABLE:
+        return error_response("ffmpeg is required for MP3 extraction but was not found.")
 
     try:
         os.makedirs(download_dir, exist_ok=True)

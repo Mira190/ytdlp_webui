@@ -16,9 +16,9 @@
 
 - **Python ≥ 3.11** (only when running from source)
 - **ffmpeg** on your `PATH`. It is needed for MP3 extraction and for merging
-  separate video and audio streams. Without it the web UI shows a warning and
-  only single-file video formats are requested, which usually caps quality at
-  720p. Install it with one of:
+  separate video and audio streams. Without it the web UI shows a warning,
+  "Audio Only" downloads are refused, and only single-file video formats are
+  requested, which usually caps quality at 720p. Install it with one of:
 
   ```bash
   winget install Gyan.FFmpeg      # Windows (or: choco install ffmpeg)

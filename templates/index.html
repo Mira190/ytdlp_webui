@@ -176,6 +176,10 @@
         document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
           el.placeholder = t(el.dataset.i18nPlaceholder);
         });
+        updateSubmitLabel();
+      }
+
+      function updateSubmitLabel() {
         submitBtn.innerText = busy ? t("downloading") : t("startBtn");
       }
 
@@ -193,7 +197,7 @@
       function setBusy(value) {
         busy = value;
         submitBtn.disabled = value;
-        submitBtn.innerText = value ? t("downloading") : t("startBtn");
+        updateSubmitLabel();
       }
 
       // Format seconds into hh:mm:ss
