@@ -4,346 +4,314 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>YT-DLP Web UI Downloader</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
   </head>
-  <body class="bg-gray-100">
-    <div class="min-h-screen flex items-center justify-center p-4">
-      <div class="w-full max-w-lg bg-white shadow-xl rounded-lg p-8">
-        <!-- Language toggle button -->
-        <div class="flex justify-end mb-4">
-          <button
-            id="toggleLangBtn"
-            class="px-3 py-1 border text-sm rounded-lg bg-gray-200 hover:bg-gray-300"
-          >
-            Switch to Chinese
-          </button>
-        </div>
-        <h1
-          id="titleText"
-          class="text-3xl font-bold text-center text-blue-600 mb-6"
-        >
-          YT-DLP Downloader
-        </h1>
-        <form id="downloadForm" class="space-y-4">
-          <div>
-            <label
-              id="labelUrl"
-              for="url"
-              class="block text-gray-700 font-medium"
-              >Video URL</label
-            >
-            <input
-              type="text"
-              id="url"
-              name="url"
-              placeholder="Enter video URL"
-              required
-              class="mt-1 block w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
-            />
-          </div>
-          <div>
-            <label
-              id="labelQuality"
-              for="quality"
-              class="block text-gray-700 font-medium"
-              >Video Quality</label
-            >
-            <select
-              id="quality"
-              name="quality"
-              class="mt-1 block w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
-            >
-              {% for opt in quality_options %}
-              <option value="{{ opt }}">{{ opt|capitalize }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div>
-            <label
-              id="labelFormat"
-              for="file_format"
-              class="block text-gray-700 font-medium"
-              >File Format</label
-            >
-            <select
-              id="file_format"
-              name="file_format"
-              class="mt-1 block w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
-            >
-              {% for fmt in format_options %}
-              <option value="{{ fmt }}">
-                {{ fmt|upper if fmt != 'default' else 'Default' }}
-              </option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="flex items-center">
-            <input
-              type="checkbox"
-              id="audio_only"
-              name="audio_only"
-              class="mr-2"
-            />
-            <label id="labelAudioOnly" for="audio_only" class="text-gray-700"
-              >Audio Only (Convert to MP3)</label
-            >
-          </div>
-          <div>
-            <label
-              id="labelDownloadDir"
-              for="download_dir"
-              class="block text-gray-700 font-medium"
-              >Download Directory</label
-            >
-            <div class="flex">
-              <input
-                type="text"
-                id="download_dir"
-                name="download_dir"
-                placeholder="e.g. C:\Downloads or /home/user/Downloads"
-                class="mt-1 block w-full px-4 py-2 border rounded-l-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
-              />
-              <button
-                type="button"
-                id="chooseDirBtn"
-                class="mt-1 px-4 py-2 bg-blue-500 text-white rounded-r-lg hover:bg-blue-600"
-              >
-                Choose
-              </button>
-            </div>
-            <p class="text-sm text-gray-500 mt-1">
-              If not supported, please manually enter the full path.
-            </p>
-          </div>
-          <div>
-            <button
-              type="submit"
-              id="submitBtn"
-              class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg"
-            >
-              Start Download
-            </button>
-          </div>
-        </form>
-        <!-- Download progress area -->
-        <div id="progressArea" class="mt-6 hidden">
-          <label id="labelProgress" class="block text-gray-700 font-medium"
-            >Download Progress</label
-          >
-          <progress
-            id="progressBar"
-            value="0"
-            max="100"
-            class="w-full"
-          ></progress>
-          <div id="progressText" class="text-gray-600 mt-2 text-center"></div>
-        </div>
-        <!-- Log output -->
-        <div
-          id="output"
-          class="mt-6 p-4 bg-gray-50 border rounded text-gray-800 whitespace-pre-wrap"
-        ></div>
+  <body>
+    <div class="card">
+      <!-- Language toggle button -->
+      <div class="toolbar">
+        <button type="button" id="toggleLangBtn" class="btn-secondary" data-i18n="switchTo">
+          Switch to Chinese
+        </button>
       </div>
+      <h1 data-i18n="title">YT-DLP Downloader</h1>
+      {% if not ffmpeg_available %}
+      <div class="banner-warning" data-i18n="ffmpegMissing">
+        ffmpeg not found. Audio extraction and merged video formats will fail. Install ffmpeg and
+        add it to PATH.
+      </div>
+      {% endif %}
+      <form id="downloadForm">
+        <div class="field">
+          <label for="url" data-i18n="linkLabel">Video URL</label>
+          <input
+            type="url"
+            id="url"
+            name="url"
+            placeholder="Enter video URL"
+            data-i18n-placeholder="placeholderUrl"
+            required
+          />
+        </div>
+        <div class="field">
+          <label for="quality" data-i18n="qualityLabel">Video Quality</label>
+          <select id="quality" name="quality">
+            {% for opt in quality_options %}
+            <option value="{{ opt }}" {% if opt == 'best' %}data-i18n="qualityBest"{% endif %}>
+              {{ opt|capitalize }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="file_format" data-i18n="formatLabel">File Format</label>
+          <select id="file_format" name="file_format">
+            {% for fmt in format_options %}
+            <option value="{{ fmt }}" {% if fmt == 'default' %}data-i18n="formatDefault"{% endif %}>
+              {{ fmt|upper if fmt != 'default' else 'Default' }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field checkbox-field">
+          <input type="checkbox" id="audio_only" name="audio_only" />
+          <label for="audio_only" data-i18n="audioOnly">Audio Only (Convert to MP3)</label>
+        </div>
+        <div class="field">
+          <label for="download_dir" data-i18n="downloadDir">Download Directory</label>
+          <input
+            type="text"
+            id="download_dir"
+            name="download_dir"
+            value="{{ default_download_dir }}"
+            placeholder="e.g. C:\Downloads or /home/user/Downloads"
+            data-i18n-placeholder="placeholderDir"
+          />
+          <p class="hint" data-i18n="dirHint">Leave as is to use the default folder</p>
+        </div>
+        <button type="submit" id="submitBtn" class="btn-primary">Start Download</button>
+      </form>
+      <!-- Download progress area -->
+      <div id="progressArea" class="progress-area hidden">
+        <label for="progressBar" data-i18n="progressLabel">Download Progress</label>
+        <progress id="progressBar" value="0" max="100"></progress>
+        <div id="progressText" class="progress-text"></div>
+        <div id="progressFile" class="progress-file"></div>
+      </div>
+      <!-- Error output -->
+      <div id="output" class="output"></div>
     </div>
 
     <script>
-      // Format seconds into hh:mm:ss
-      function formatTime(seconds) {
-        let secNum = parseInt(seconds, 10);
-        let hours = Math.floor(secNum / 3600);
-        let minutes = Math.floor((secNum - hours * 3600) / 60);
-        let secs = secNum - hours * 3600 - minutes * 60;
-        return (
-          (hours < 10 ? "0" + hours : hours) +
-          ":" +
-          (minutes < 10 ? "0" + minutes : minutes) +
-          ":" +
-          (secs < 10 ? "0" + secs : secs)
-        );
-      }
+      const POLL_INTERVAL_MS = 1000;
+      const MAX_UNKNOWN_POLLS = 5;
 
-      // Simple i18n dictionary
       const i18n = {
         en: {
           title: "YT-DLP Downloader",
+          switchTo: "Switch to Chinese",
+          ffmpegMissing:
+            "ffmpeg not found. Audio extraction and merged video formats will fail. Install ffmpeg and add it to PATH.",
           linkLabel: "Video URL",
+          placeholderUrl: "Enter video URL",
           qualityLabel: "Video Quality",
+          qualityBest: "Best",
           formatLabel: "File Format",
+          formatDefault: "Default",
           audioOnly: "Audio Only (Convert to MP3)",
           downloadDir: "Download Directory",
+          placeholderDir: "e.g. C:\\Downloads or /home/user/Downloads",
+          dirHint: "Leave as is to use the default folder",
           startBtn: "Start Download",
           progressLabel: "Download Progress",
-          switchTo: "Switch to Chinese",
-          placeholderUrl: "Enter video URL",
-          placeholderDir: "e.g. C:\\Downloads or /home/user/Downloads",
           downloading: "Downloading...",
-          completed: "Download Completed",
           initializing: "Initializing...",
+          processing: "Processing (merging / converting)...",
+          completed: "Download Completed",
           errorPrefix: "Error: ",
+          unknownError: "Unknown error",
+          unknownJob: "Download job not found. It may have expired or the server was restarted.",
+          networkError: "Network error: ",
         },
         zh: {
           title: "YT-DLP 下载器",
+          switchTo: "切换到英语",
+          ffmpegMissing:
+            "未找到 ffmpeg。音频提取和需要合并的视频格式将会失败。请安装 ffmpeg 并将其加入 PATH。",
           linkLabel: "视频链接",
+          placeholderUrl: "请输入视频链接",
           qualityLabel: "视频质量",
+          qualityBest: "最佳",
           formatLabel: "下载格式",
+          formatDefault: "默认",
           audioOnly: "仅下载音频（转为 MP3）",
           downloadDir: "下载目录",
+          placeholderDir: "例如：C:\\Downloads 或 /home/user/Downloads",
+          dirHint: "留空则使用默认目录",
           startBtn: "开始下载",
           progressLabel: "下载进度",
-          switchTo: "切换到英语",
-          placeholderUrl: "请输入视频链接",
-          placeholderDir: "例如：C:\\Downloads 或 /home/user/Downloads",
           downloading: "下载中...",
-          completed: "下载完成",
           initializing: "初始化...",
+          processing: "处理中（合并 / 转换）...",
+          completed: "下载完成",
           errorPrefix: "错误：",
+          unknownError: "未知错误",
+          unknownJob: "找不到下载任务，可能已过期或服务已重启。",
+          networkError: "网络错误：",
         },
       };
-
-      let userLang = navigator.language || navigator.userLanguage;
-      let currentLang = userLang.toLowerCase().startsWith("zh") ? "zh" : "en";
-
-      function setLanguage(lang) {
-        document.getElementById("titleText").innerText = i18n[lang].title;
-        document.getElementById("labelUrl").innerText = i18n[lang].linkLabel;
-        document.getElementById("labelQuality").innerText =
-          i18n[lang].qualityLabel;
-        document.getElementById("labelFormat").innerText =
-          i18n[lang].formatLabel;
-        document.getElementById("labelAudioOnly").innerText =
-          i18n[lang].audioOnly;
-        document.getElementById("labelDownloadDir").innerText =
-          i18n[lang].downloadDir;
-        document.getElementById("submitBtn").innerText = i18n[lang].startBtn;
-        document.getElementById("labelProgress").innerText =
-          i18n[lang].progressLabel;
-        toggleLangBtn.innerText = i18n[lang].switchTo;
-        document.getElementById("url").placeholder = i18n[lang].placeholderUrl;
-        document.getElementById("download_dir").placeholder =
-          i18n[lang].placeholderDir;
-      }
-
-      const toggleLangBtn = document.getElementById("toggleLangBtn");
-      toggleLangBtn.addEventListener("click", () => {
-        currentLang = currentLang === "en" ? "zh" : "en";
-        setLanguage(currentLang);
-      });
-      setLanguage(currentLang);
 
       const form = document.getElementById("downloadForm");
       const outputDiv = document.getElementById("output");
       const submitBtn = document.getElementById("submitBtn");
       const progressBar = document.getElementById("progressBar");
       const progressText = document.getElementById("progressText");
+      const progressFile = document.getElementById("progressFile");
       const progressArea = document.getElementById("progressArea");
-      const chooseDirBtn = document.getElementById("chooseDirBtn");
+      const toggleLangBtn = document.getElementById("toggleLangBtn");
 
-      // Directory picker (only some browsers support this feature)
-      chooseDirBtn.addEventListener("click", async () => {
-        if (window.showDirectoryPicker) {
-          try {
-            const dirHandle = await window.showDirectoryPicker();
-            // We only retrieve the folder name; actual path is not provided by the browser
-            document.getElementById("download_dir").value = dirHandle.name;
-            alert(
-              "Directory selected, but the browser cannot return its full path. Please ensure that directory exists on the server or enter the full path manually."
-            );
-          } catch (e) {
-            console.error(e);
-            alert("Directory selection failed or was canceled.");
-          }
-        } else {
-          alert(
-            "This browser does not support directory picking. Please enter it manually."
-          );
+      let busy = false;
+      let currentLang = initialLanguage();
+
+      function t(key) {
+        return i18n[currentLang][key];
+      }
+
+      function initialLanguage() {
+        try {
+          const saved = localStorage.getItem("lang");
+          if (saved === "en" || saved === "zh") return saved;
+        } catch (e) {
+          // localStorage unavailable (e.g. privacy mode); fall through.
         }
+        const userLang = navigator.language || navigator.userLanguage || "en";
+        return userLang.toLowerCase().startsWith("zh") ? "zh" : "en";
+      }
+
+      function applyLanguage() {
+        document.documentElement.lang = currentLang === "zh" ? "zh-CN" : "en";
+        document.querySelectorAll("[data-i18n]").forEach((el) => {
+          el.innerText = t(el.dataset.i18n);
+        });
+        document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+          el.placeholder = t(el.dataset.i18nPlaceholder);
+        });
+        submitBtn.innerText = busy ? t("downloading") : t("startBtn");
+      }
+
+      toggleLangBtn.addEventListener("click", () => {
+        currentLang = currentLang === "en" ? "zh" : "en";
+        try {
+          localStorage.setItem("lang", currentLang);
+        } catch (e) {
+          // Ignore: the choice just won't be remembered.
+        }
+        applyLanguage();
       });
+      applyLanguage();
+
+      function setBusy(value) {
+        busy = value;
+        submitBtn.disabled = value;
+        submitBtn.innerText = value ? t("downloading") : t("startBtn");
+      }
+
+      // Format seconds into hh:mm:ss
+      function formatTime(seconds) {
+        const secNum = Math.max(0, Math.floor(seconds));
+        const hours = Math.floor(secNum / 3600);
+        const minutes = Math.floor((secNum % 3600) / 60);
+        const secs = secNum % 60;
+        return [hours, minutes, secs].map((n) => String(n).padStart(2, "0")).join(":");
+      }
+
+      // Format a byte count as B / KiB / MiB / GiB
+      function formatBytes(n) {
+        const units = ["B", "KiB", "MiB", "GiB"];
+        let value = Number(n) || 0;
+        let i = 0;
+        while (value >= 1024 && i < units.length - 1) {
+          value /= 1024;
+          i++;
+        }
+        return (i === 0 ? value : value.toFixed(1)) + " " + units[i];
+      }
+
+      function describeDownloading(data) {
+        const parts = [(data.percent || 0) + "%"];
+        if (data.total_bytes) {
+          parts.push(formatBytes(data.downloaded_bytes) + "/" + formatBytes(data.total_bytes));
+        } else if (data.downloaded_bytes) {
+          parts.push(formatBytes(data.downloaded_bytes));
+        }
+        if (data.speed) parts.push(formatBytes(data.speed) + "/s");
+        if (data.eta) parts.push("ETA " + formatTime(data.eta));
+        return parts.join(" · ");
+      }
 
       // Form submission handler
-      form.addEventListener("submit", function (e) {
+      form.addEventListener("submit", (e) => {
         e.preventDefault();
         outputDiv.innerText = "";
-        submitBtn.disabled = true;
-        submitBtn.innerText =
-          currentLang === "zh" ? i18n.zh.downloading : i18n.en.downloading;
+        setBusy(true);
         progressBar.value = 0;
         progressText.innerText = "";
+        progressFile.innerText = "";
         progressArea.classList.remove("hidden");
 
-        const formData = new FormData(form);
-        fetch("/download", {
-          method: "POST",
-          body: formData,
-        })
+        fetch("/download", { method: "POST", body: new FormData(form) })
           .then((response) => response.json())
           .then((data) => {
             if (data.status === "started" && data.job_id) {
+              progressText.innerText = t("initializing");
               pollProgress(data.job_id);
             } else {
-              outputDiv.innerText = data.output || "Error!";
-              submitBtn.disabled = false;
-              submitBtn.innerText = i18n[currentLang].startBtn;
+              progressArea.classList.add("hidden");
+              outputDiv.innerText = t("errorPrefix") + (data.output || t("unknownError"));
+              setBusy(false);
             }
           })
-          .catch((error) => {
-            outputDiv.innerText = "Error: " + error;
-            submitBtn.disabled = false;
-            submitBtn.innerText = i18n[currentLang].startBtn;
+          .catch((err) => {
+            progressArea.classList.add("hidden");
+            outputDiv.innerText = t("networkError") + err;
+            setBusy(false);
           });
       });
 
-      // Poll progress from the server using job_id
-      function pollProgress(job_id) {
-        const interval = setInterval(() => {
-          fetch("/progress?job_id=" + job_id)
-            .then((response) => response.json())
-            .then((data) => {
-              // We expect data to contain {status, percent, speed, eta} if status = 'downloading'
-              if (data.status === "downloading") {
-                let percent = data.percent || 0;
-                // Ensure percent is between 0 and 100
-                if (percent < 0) percent = 0;
-                if (percent > 100) percent = 100;
+      // Poll progress from the server using job_id. Each request is only
+      // scheduled after the previous one completes, so requests never pile up.
+      function pollProgress(jobId) {
+        let unknownCount = 0;
 
-                progressBar.value = percent;
+        function stop(message) {
+          if (message !== undefined) progressText.innerText = message;
+          setBusy(false);
+        }
 
-                let speedStr = data.speed
-                  ? Math.floor(data.speed / 1024) + " KiB/s"
-                  : "";
-                let etaStr = data.eta ? " ETA " + formatTime(data.eta) : "";
-
-                progressText.innerText = percent + "% " + speedStr + etaStr;
-              } else if (data.status === "finished") {
-                // Download is finished
-                progressBar.value = 100;
-                progressText.innerText =
-                  currentLang === "zh" ? i18n.zh.completed : i18n.en.completed;
-                clearInterval(interval);
-                submitBtn.disabled = false;
-                submitBtn.innerText = i18n[currentLang].startBtn;
-              } else if (data.status === "error") {
-                // An error occurred
-                progressText.innerText =
-                  i18n[currentLang].errorPrefix +
-                  (data.error || "Unknown error");
-                clearInterval(interval);
-                submitBtn.disabled = false;
-                submitBtn.innerText = i18n[currentLang].startBtn;
-              } else {
-                // For status = 'started', 'init', or 'unknown'
-                progressText.innerText =
-                  currentLang === "zh"
-                    ? i18n.zh.initializing
-                    : i18n.en.initializing;
+        function poll() {
+          fetch("/progress?job_id=" + encodeURIComponent(jobId))
+            .then((response) =>
+              response.json().then((data) => ({ httpStatus: response.status, data }))
+            )
+            .then(({ httpStatus, data }) => {
+              if (httpStatus === 404 || data.status === "unknown") {
+                unknownCount++;
+                if (unknownCount >= MAX_UNKNOWN_POLLS) {
+                  stop(t("errorPrefix") + t("unknownJob"));
+                  return;
+                }
+                setTimeout(poll, POLL_INTERVAL_MS);
+                return;
               }
+              unknownCount = 0;
+
+              if (data.filename) progressFile.innerText = data.filename;
+
+              if (data.status === "downloading") {
+                progressBar.value = Math.min(100, Math.max(0, data.percent || 0));
+                progressText.innerText = describeDownloading(data);
+              } else if (data.status === "processing") {
+                progressBar.value = 100;
+                progressText.innerText = t("processing");
+              } else if (data.status === "finished") {
+                progressBar.value = 100;
+                stop(t("completed"));
+                return;
+              } else if (data.status === "error") {
+                stop(t("errorPrefix") + (data.error || t("unknownError")));
+                return;
+              } else {
+                // "started": the download thread has not reported yet.
+                progressText.innerText = t("initializing");
+              }
+              setTimeout(poll, POLL_INTERVAL_MS);
             })
             .catch((err) => {
-              progressText.innerText = i18n[currentLang].errorPrefix + err;
-              clearInterval(interval);
-              submitBtn.disabled = false;
-              submitBtn.innerText = i18n[currentLang].startBtn;
+              stop(t("networkError") + err);
             });
-        }, 1000);
+        }
+
+        setTimeout(poll, POLL_INTERVAL_MS);
       }
     </script>
   </body>
