@@ -38,10 +38,7 @@ jobs:
           pip install pyinstaller
 
       - name: Build EXE
-        run: pyinstaller --onefile --add-data "templates;templates" main.py
-
-      - name: Rename artifact
-        run: Rename-Item -Path "dist/main.exe" -NewName "yt-dlp-webui.exe"
+        run: pyinstaller --onefile --name yt-dlp-webui --add-data "templates;templates" --add-data "static;static" main.py
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

@@ -9,8 +9,21 @@
 - 📺 Select video resolution (480p, 720p, 1080p)
 - 🚀 Real-time progress display with percentage & ETA
 - 🌍 Multi-language support (English & Chinese)
-- 📁 Choose download directory
+- 📁 Custom download directory (defaults to `~/Downloads`)
 - 🎯 Simply enter the video URL, select format & resolution, and click "Start Download" – it's that easy!
+
+## 📋 Requirements
+
+- **Python ≥ 3.11** (only when running from source)
+- **ffmpeg** on your `PATH`. It is needed for MP3 extraction and for any format
+  that merges separate video and audio streams (the web UI shows a warning when
+  it cannot find ffmpeg). Install it with one of:
+
+  ```bash
+  winget install Gyan.FFmpeg      # Windows (or: choco install ffmpeg)
+  brew install ffmpeg             # macOS
+  sudo apt install ffmpeg         # Debian / Ubuntu
+  ```
 
 ## 📥 Download & Run
 
@@ -25,9 +38,11 @@
 
 ### 🛠️ Method 2️⃣: Run Locally
 
-Install Python dependencies:
+Create a virtual environment and install the Python dependencies:
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
@@ -37,10 +52,22 @@ Start the Flask server:
 python main.py
 ```
 
-Open your browser and go to:
+Your browser opens automatically at:
 
 ```
 http://127.0.0.1:5000
+```
+
+The server only listens on `127.0.0.1`. Files are saved to `~/Downloads` unless
+you enter another directory in the form. Optional environment variables:
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `YTDLP_WEBUI_PORT` | `5000` | Port to listen on |
+| `YTDLP_WEBUI_NO_BROWSER` | unset | Set to `1` to not open the browser on startup |
+
+```bash
+YTDLP_WEBUI_PORT=8080 YTDLP_WEBUI_NO_BROWSER=1 python main.py
 ```
 
 ## 🛠️ Build Windows EXE
@@ -48,10 +75,21 @@ http://127.0.0.1:5000
 If you want to create a standalone `.exe`, run:
 
 ```bash
-pyinstaller --onefile --add-data "templates;templates" main.py
+pyinstaller --onefile --name yt-dlp-webui --add-data "templates;templates" --add-data "static;static" main.py
 ```
 
-The generated executable will be in the `dist/` folder.
+The generated `yt-dlp-webui.exe` will be in the `dist/` folder. (On macOS/Linux,
+use `:` instead of `;` in the `--add-data` arguments.)
+
+## 🧪 Development
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+ruff check . && ruff format --check .
+```
+
+The tests fake yt-dlp, so they need neither network access nor ffmpeg.
 
 ## 🚀 Releasing
 
@@ -64,15 +102,17 @@ git tag v1.2.0
 git push origin v1.2.0
 ```
 
-Every push/PR to `main` also runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml),
-a quick compile/import sanity check, so breakage is caught before a release is cut.
+Every push/PR to `main` also runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+(ruff lint/format checks and the pytest suite on Python 3.11 and 3.12), so breakage
+is caught before a release is cut.
 
 ## 📌 Troubleshooting
 
 1. **EXE doesn't open?**
    Your antivirus might be blocking it. Try adding an exception for `yt-dlp-webui.exe`.
-2. **install.bat can't find Python?**
-   Install Python manually from python.org and try again.
+2. **Download completes but there is no merged file / audio is not converted to MP3?**
+   ffmpeg is missing. Install it (see [Requirements](#-requirements)) and make sure
+   it is on your `PATH`, then restart the app.
 3. **No progress updates during download?**
    Update yt-dlp by running:
    ```bash
